@@ -5,15 +5,11 @@
 
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
-import org.apache.hadoop.mapreduce.Partitioner;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.partition.HashPartitioner;
-import org.apache.htrace.fasterxml.jackson.annotation.JsonFormat;
-import org.jruby.RubyProcess;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashSet;
 
 public class TaskTwo {
 

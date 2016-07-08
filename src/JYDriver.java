@@ -98,7 +98,6 @@ public class JYDriver {
         pw2.println("Id,Label,Class,Pagerank");
 
         String line = br.readLine();
-        int no = 0;
         while(line != null){
             String[] tuple = line.split("\\t");
             assert tuple.length == 4;
@@ -120,34 +119,34 @@ public class JYDriver {
     static void run(String input, String nametable, String output){
         try {
             String prefix = output.substring(0, output.lastIndexOf("/"));
-            String preprocess_output = prefix + "/preprocess";
             Configuration conf = new Configuration();
 
 
 
             //preprocess
+            String preprocess_output = prefix + "/preprocess";
             String[] args = {input, nametable, preprocess_output};
-//            PreProcess.run(args);
+            PreProcess.run(args);
 
 
             //feature process
             String feature_output = prefix + "/feature";
-//            runJob(conf, "feature select", TaskTwo.class, TaskTwo.CountMapper.class, Text.class, Text.class,
-//                    TaskTwo.CountReducer.class, Text.class, Text.class, preprocess_output, feature_output,
-//                    null, TaskTwo.CountCombiner.class, TaskTwo.TTPartionner.class, 4);
+            runJob(conf, "feature select", TaskTwo.class, TaskTwo.CountMapper.class, Text.class, Text.class,
+                    TaskTwo.CountReducer.class, Text.class, Text.class, preprocess_output, feature_output,
+                    null, TaskTwo.CountCombiner.class, TaskTwo.TTPartionner.class, 4);
 
 
             //pagerank
             conf.setDouble("PR_init", 0.5);
             conf.setDouble("damp", 0.85);
-            int times = 30;
+            int times = 15;
             String pagerank_output = prefix + "/pagerank";
             String tempPath = iterMapReduce(conf, feature_output, pagerank_output, times, new JobRunable() {
                         @Override
                         public void run(Configuration conf, String input, String output) throws InterruptedException, IOException, ClassNotFoundException {
                             runJob(conf, "PageRankIter",
                                     PageRankIter.class, PageRankIter.PRIterMapper.class, Text.class, Text.class,
-                                    PageRankIter.PRIterReducer.class, Text.class, Text.class, input, output, null, null, null, 1);
+                                    PageRankIter.PRIterReducer.class, Text.class, Text.class, input, output, null, null, null, 4);
                         }
                     },
                     new JobRunable() {

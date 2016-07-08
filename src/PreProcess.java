@@ -13,6 +13,7 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.util.GenericOptionsParser;
 
 import java.io.*;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 
@@ -22,12 +23,15 @@ public class PreProcess {
         private static HashSet<String> library;
         private static Text nullText;
         private static BufferedReader fr;
+        private static HashMap<String, String> aliasTable;
 
         public void setup(Context context) throws IOException {
             library = new HashSet<>();
+            aliasTable = new HashMap<>();
+
             nullText = new Text("");
             try {
-                Path path = new Path(context.getConfiguration().get("cache"));
+                Path path = new Path(context.getConfiguration().get("name_list", null));
 
                 fr = new BufferedReader(new FileReader(path.toString()));
                 String text = fr.readLine();
@@ -41,6 +45,21 @@ public class PreProcess {
             for(String str:library){
                 UserDefineLibrary.insertWord(str,"nr",1000);
             }
+
+            String aliasFile = context.getConfiguration().get("alias", null);
+            if(aliasFile != null) {
+                fr = new BufferedReader(new FileReader(aliasFile));
+                String text = fr.readLine();
+                while (text != null) {
+                    String[] splits = text.split(" ");
+                    int len = splits.length;
+                    for (int i = 0; i < len - 1; i++)
+                        if (!aliasTable.containsKey(splits[i]))
+                            aliasTable.put(splits[i], splits[len - 1]);
+                    text = fr.readLine();
+                }
+                fr.close();
+            }
         }
 
         public void map(Object key,Text value,Context context)throws IOException,InterruptedException {
@@ -53,6 +72,8 @@ public class PreProcess {
             int count = 0;
             for(Term t:names) {
                 String name = t.getRealName();
+                if(aliasTable.containsKey(name))
+                    name = aliasTable.get(name);
                 if(library.contains(name) && !set.contains(name)) {
                     builder.append(t.getRealName());
                     builder.append(" ");
@@ -88,27 +109,23 @@ public class PreProcess {
 
     public static void run(String[] args) throws Exception {
         // TODO Auto-generated method stub
-        if(args.length != 3){
-            System.out.println("args not match!");
-            System.exit(-1);
-        }
-
-
-
-
         File dir = new File(args[2]);
         if(dir.exists())
             deleteDir(dir);
         Configuration conf=new Configuration();
-        conf.set("cache", args[1].substring(args[1].lastIndexOf("/") + 1, args[1].length()));
+        conf.set("name_list", args[1].substring(args[1].lastIndexOf("/") + 1, args[1].length()));
+        if(args.length >= 4)
+            conf.set("alias", args[3].substring(args[3].lastIndexOf("/") + 1, args[3].length()));
         String[] otherArgs=new GenericOptionsParser(conf,args).getRemainingArgs();
         if (otherArgs.length!=3) {
             System.err.println("Usage:PreProcess<in><out>");
             System.exit(2);
         }
         Job job=new Job(conf,"PreProcess");
-
         job.addCacheFile(new Path(args[1]).toUri());
+        if(args.length >= 4)
+            job.addCacheFile(new Path(args[3]).toUri());
+
         job.setJarByClass(PreProcess.class);
 
         job.setMapperClass(MyMapper.class);
