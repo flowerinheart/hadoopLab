@@ -40,7 +40,8 @@ class PageRankIter {
                 PR = 0.5;
             else
                 PR = Double.parseDouble(tuple[2]);
-            for (String link : linklist) {
+            for (String link : linklist)
+            {
                 String[] splits = link.split(",");
                 assert splits.length == 2;
                 String prValue = null;
