@@ -1,24 +1,23 @@
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.RawComparator;
 import org.apache.hadoop.io.Text;
-import org.apache.hadoop.io.WritableComparator;
-import org.apache.hadoop.mapred.JobConfigurable;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
-import org.apache.hadoop.yarn.webapp.hamlet.HamletSpec;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.PrintWriter;
 
 /**
  * Created by darnell on 5/26/16.
  */
 
 public class JYDriver {
-    static interface JobRunable{
-        public void run(Configuration conf, String input, String output) throws InterruptedException, IOException, ClassNotFoundException;
+    interface JobRunable{
+        void run(Configuration conf, String input, String output) throws InterruptedException, IOException, ClassNotFoundException;
     }
     static public void runJob(Configuration conf, String jobName, Class jarClass, Class mapperClass, Class mapperKeyClass,
                               Class mapperValueClass, Class reducerClass, Class reducerKeyClass, Class  reducerValueClass,
@@ -83,8 +82,11 @@ public class JYDriver {
             runner.run(conf, in, out);
         }
 
-        conf.setInt("cur_times", times);
-        cleanner.run(conf, out, output);
+        if(cleanner != null)
+        {
+            conf.setInt("cur_times", times);
+            cleanner.run(conf, out, output);
+        }
         return out;
     }
 
@@ -92,8 +94,8 @@ public class JYDriver {
     static void generateGraphConfFile(String input) throws IOException {
         BufferedReader br = new BufferedReader(new FileReader(input + "/part-r-00000"));
         String prefix = input.substring(0, input.lastIndexOf('/'));
-        PrintWriter pw1 = new PrintWriter(prefix + "GraphEdgeConfFile.csv");
-        PrintWriter pw2 = new PrintWriter(prefix + "GraphNodeConfFile.csv");
+        PrintWriter pw1 = new PrintWriter(prefix + "/GraphEdgeConfFile.csv");
+        PrintWriter pw2 = new PrintWriter(prefix + "/GraphNodeConfFile.csv");
         pw1.println("Source,Target,Weight, Class");
         pw2.println("Id,Label,Class,Pagerank");
 
@@ -116,24 +118,26 @@ public class JYDriver {
 
     }
 
-    static void run(String input, String nametable, String output){
+    static void run(String[] args){
         try {
+            String output = args[2];
             String prefix = output.substring(0, output.lastIndexOf("/"));
             Configuration conf = new Configuration();
 
 
 
             //preprocess
-            String preprocess_output = prefix + "/preprocess";
-            String[] args = {input, nametable, preprocess_output};
+            String preprocessOutput = prefix + "/preprocess";
+            String[] temp = args.clone();
+            args[2] = preprocessOutput;
             PreProcess.run(args);
 
 
             //feature process
-            String feature_output = prefix + "/feature";
+            String featureOutput = prefix + "/feature";
             runJob(conf, "feature select", TaskTwo.class, TaskTwo.CountMapper.class, Text.class, Text.class,
-                    TaskTwo.CountReducer.class, Text.class, Text.class, preprocess_output, feature_output,
-                    null, TaskTwo.CountCombiner.class, TaskTwo.TTPartionner.class, 4);
+                    TaskTwo.CountReducer.class, Text.class, Text.class, preprocessOutput, featureOutput,
+                    null, TaskTwo.CountCombiner.class, TaskTwo.TTPartionner.class, 1);
 
 
             //pagerank
@@ -141,22 +145,46 @@ public class JYDriver {
             conf.setDouble("damp", 0.85);
             int times = 15;
             String pagerank_output = prefix + "/pagerank";
-            String tempPath = iterMapReduce(conf, feature_output, pagerank_output, times, new JobRunable() {
-                        @Override
-                        public void run(Configuration conf, String input, String output) throws InterruptedException, IOException, ClassNotFoundException {
-                            runJob(conf, "PageRankIter",
-                                    PageRankIter.class, PageRankIter.PRIterMapper.class, Text.class, Text.class,
-                                    PageRankIter.PRIterReducer.class, Text.class, Text.class, input, output, null, null, null, 4);
-                        }
-                    },
-                    new JobRunable() {
-                        @Override
-                        public void run(Configuration conf, String input, String output) throws InterruptedException, IOException, ClassNotFoundException {
-                            runJob(conf, "Sort", PageRankSort.class, PageRankSort.SortMapper.class, MyK2.class, Text.class,
-                                    PageRankSort.SortReducer.class, Text.class, MyK2.class, input, output, null, null, null, 1);
-                        }
-                    });
-            generateGraphConfFile(tempPath);
+
+            JobRunable pagerankRunner = new JobRunable() {
+                @Override
+                public void run(Configuration conf, String input, String output) throws InterruptedException, IOException, ClassNotFoundException {
+                    runJob(conf, "PageRankIter",
+                            PageRankIter.class, PageRankIter.PRIterMapper.class, Text.class, Text.class,
+                            PageRankIter.PRIterReducer.class, Text.class, Text.class, input, output, null, null, null, 1);
+                }
+            };
+
+            JobRunable sortRunner = new JobRunable() {
+                @Override
+                public void run(Configuration conf, String input, String output) throws InterruptedException, IOException, ClassNotFoundException {
+                    runJob(conf, "Sort", PageRankSort.class, PageRankSort.SortMapper.class, MyK2.class, Text.class,
+                            PageRankSort.SortReducer.class, Text.class, MyK2.class, input, output, null, null, null, 1);
+                }
+            };
+
+
+            JobRunable LPARunner = new JobRunable() {
+                @Override
+                public void run(Configuration conf, String input, String output) throws InterruptedException, IOException, ClassNotFoundException {
+                    runJob(conf, "LPA", LPA.class, LPA.LPAMapper.class, Text.class, Text.class,
+                            LPA.LPAReducer.class, Text.class, Text.class, input, output, null, null, null, 1);
+                }
+            };
+
+            int[] tryTimes = {1,2,5,10,15,20,25,30};
+            for(int i = 0; i < tryTimes.length; i++) {
+                String pagerank_out = prefix + "/" + "pagerank_" + String.valueOf(tryTimes[i]);
+                String lpa_out = prefix + "/" + "LPA_" + String.valueOf(tryTimes[i]);
+                iterMapReduce(conf, featureOutput, pagerank_out, tryTimes[i], pagerankRunner, sortRunner);
+                iterMapReduce(conf, featureOutput, lpa_out, tryTimes[i], LPARunner, null);
+            }
+
+
+
+
+
+//            generateGraphConfFile(tempPath);
 
         } catch (IOException e) {
             e.printStackTrace();
@@ -172,10 +200,6 @@ public class JYDriver {
     }
 
     public static void main(String[] argv){
-        if(argv.length != 3){
-            System.err.printf("error\n");
-            System.exit(-1);
-        }
-        run(argv[0], argv[1], argv[2]);
+        run(argv);
     }
 }

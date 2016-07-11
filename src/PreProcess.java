@@ -2,7 +2,7 @@ import org.ansj.domain.Term;
 import org.ansj.library.UserDefineLibrary;
 import org.ansj.splitWord.analysis.ToAnalysis;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.*;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
@@ -10,12 +10,12 @@ import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
-import org.apache.hadoop.util.GenericOptionsParser;
 
 import java.io.*;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.net.URI;
 
 public class PreProcess {
 
@@ -25,15 +25,18 @@ public class PreProcess {
         private static BufferedReader fr;
         private static HashMap<String, String> aliasTable;
 
+        @Override
         public void setup(Context context) throws IOException {
+            URI[] uris  = context.getCacheFiles();
             library = new HashSet<>();
             aliasTable = new HashMap<>();
 
             nullText = new Text("");
             try {
-                Path path = new Path(context.getConfiguration().get("name_list", null));
+//                Path path = new Path(context.getConfiguration().get("name_list", null));
 
-                fr = new BufferedReader(new FileReader(path.toString()));
+//                fr = new BufferedReader(new FileReader(path.toString()));
+                fr = new BufferedReader(new FileReader(uris[0].getPath()));
                 String text = fr.readLine();
                 while(text != null) {
                     library.add(text);
@@ -48,7 +51,8 @@ public class PreProcess {
 
             String aliasFile = context.getConfiguration().get("alias", null);
             if(aliasFile != null) {
-                fr = new BufferedReader(new FileReader(aliasFile));
+//                fr = new BufferedReader(new FileReader(aliasFile));
+                fr = new BufferedReader(new FileReader(uris[1].getPath()));
                 String text = fr.readLine();
                 while (text != null) {
                     String[] splits = text.split(" ");
@@ -62,6 +66,7 @@ public class PreProcess {
             }
         }
 
+        @Override
         public void map(Object key,Text value,Context context)throws IOException,InterruptedException {
             HashSet<String> set = new HashSet<>();
             String s = value.toString();
@@ -71,14 +76,23 @@ public class PreProcess {
             List<Term> names = ToAnalysis.parse(s);
             int count = 0;
             for(Term t:names) {
-                String name = t.getRealName();
-                if(aliasTable.containsKey(name))
-                    name = aliasTable.get(name);
-                if(library.contains(name) && !set.contains(name)) {
-                    builder.append(t.getRealName());
-                    builder.append(" ");
-                    set.add(name);
-                    count++;
+                String str = t.getRealName();
+                if(aliasTable.containsKey(str)) {
+                    if(library.contains(str))
+                        System.out.println();
+                    str = aliasTable.get(str);
+                    if(!library.contains(str))
+                        System.out.println();
+                }
+                String[] splits = str.split(",");
+                for(String name : splits) {
+                    if(library.contains(name) && !set.contains(name) ) {
+                        if(!t.getNatureStr().equals("n") && !t.getNatureStr().equals("nr") && !t.getNatureStr().equals("ns"))
+                            continue;
+                        builder.append(name).append(" ");
+                        set.add(name);
+                        count++;
+                    }
                 }
             }
 
@@ -88,9 +102,21 @@ public class PreProcess {
             Text text = new Text(builder.toString());
             context.write(text,nullText);
         }
+
+//        @Override
+//        public void cleanup(Context context) throws IOException {
+//            Configuration conf = context.getConfiguration();
+//            String nameList = conf.get("name_list", null);
+//            String alias = conf.get("alias", null);
+//            HadoopTool.deleteFile(nameList, conf);
+//            HadoopTool.deleteFile(alias, conf);
+//
+//        }
     }
 
-    public static class MyReducer extends Reducer<Text, IntWritable, Text, Text> {
+
+
+    public static class MyReducer extends Reducer<Text, Text, Text, Text> {
         public void reduce(Text key,Iterable<Text>values,Context context) throws IOException,InterruptedException{
             for(Text t : values)
                 context.write(key,new Text(""));
@@ -113,20 +139,20 @@ public class PreProcess {
         if(dir.exists())
             deleteDir(dir);
         Configuration conf=new Configuration();
-        conf.set("name_list", args[1].substring(args[1].lastIndexOf("/") + 1, args[1].length()));
-        if(args.length >= 4)
-            conf.set("alias", args[3].substring(args[3].lastIndexOf("/") + 1, args[3].length()));
-        String[] otherArgs=new GenericOptionsParser(conf,args).getRemainingArgs();
-        if (otherArgs.length!=3) {
-            System.err.println("Usage:PreProcess<in><out>");
-            System.exit(2);
+        String filename = args[1].substring(args[1].lastIndexOf("/") + 1, args[1].length());
+        conf.set("name_list", filename);
+        if(args.length >= 4) {
+            filename = args[3].substring(args[3].lastIndexOf("/") + 1, args[3].length());
+            conf.set("alias", filename);
         }
         Job job=new Job(conf,"PreProcess");
+        //add cache file
         job.addCacheFile(new Path(args[1]).toUri());
         if(args.length >= 4)
             job.addCacheFile(new Path(args[3]).toUri());
 
         job.setJarByClass(PreProcess.class);
+        job.setNumReduceTasks(4);
 
         job.setMapperClass(MyMapper.class);
         job.setReducerClass(MyReducer.class);
@@ -134,15 +160,16 @@ public class PreProcess {
         job.setMapOutputKeyClass(Text.class);
         job.setMapOutputValueClass(Text.class);
 
+
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(Text.class);
 
 
-        Path outputPath = new Path(otherArgs[2]);
+        Path outputPath = new Path(args[2]);
 
         System.out.println(System.getProperty("user.dir"));
-        FileInputFormat.addInputPath(job, new Path(otherArgs[0]));
-        FileOutputFormat.setOutputPath(job, new Path(otherArgs[2]));
+        FileInputFormat.addInputPath(job, new Path(args[0]));
+        FileOutputFormat.setOutputPath(job, new Path(args[2]));
 
         outputPath.getFileSystem(conf).delete(outputPath,true);
 

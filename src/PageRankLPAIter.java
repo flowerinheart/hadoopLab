@@ -1,4 +1,3 @@
-import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
@@ -10,7 +9,7 @@ import java.util.Random;
 /**
  * Created by darnell on 7/4/16.
  */
-class PageRankIter {
+class PageRankLPAIter {
     private static Text t1 = new Text();
     private static Text t2 = new Text();
     static class PRIterMapper extends Mapper<Object, Text, Text, Text> {

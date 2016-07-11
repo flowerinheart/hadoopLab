@@ -3,6 +3,7 @@
  */
 
 
+import org.apache.commons.beanutils.converters.IntegerArrayConverter;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
@@ -10,6 +11,8 @@ import org.apache.hadoop.mapreduce.lib.partition.HashPartitioner;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 
 public class TaskTwo {
 
@@ -63,18 +66,21 @@ public class TaskTwo {
         private Text result = new Text();
 
         public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
-            ArrayList<String> list = new ArrayList<>();
+            HashMap<String, Integer> map = new HashMap<>();
             int sum = 0;
             for (Text value : values) {
-                list.add(value.toString());
-                sum += Integer.parseInt(value.toString().split(",")[1]);
+                String[] strs = value.toString().split(",");
+                if(map.containsKey(strs[0]))
+                    map.put(strs[0], map.get(strs[0]) + Integer.parseInt(strs[1]));
+                else
+                    map.put(strs[0], Integer.parseInt(strs[1]));
+                sum += Integer.parseInt(strs[1]);
             }
 
             StringBuilder str = new StringBuilder();
-            for (String value : list) {
-                String s[] = value.split(",");
-                double rate = (double) Integer.parseInt(s[1]) / (double) sum;
-                str.append(" ").append(s[0]).append(",").append(Double.toString(rate));
+            for (String value : map.keySet()) {
+                double rate = (double) map.get(value) / (double) sum;
+                str.append(" ").append(value).append(",").append(Double.toString(rate));
             }
             str.deleteCharAt(0);
             result.set(String.valueOf(str));
